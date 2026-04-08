@@ -1,3 +1,0 @@
-/home/alcatraz/Desktop/MyProject/void-game/build/CMakeFiles/void_game.dir
-/home/alcatraz/Desktop/MyProject/void-game/build/CMakeFiles/edit_cache.dir
-/home/alcatraz/Desktop/MyProject/void-game/build/CMakeFiles/rebuild_cache.dir
