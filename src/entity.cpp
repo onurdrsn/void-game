@@ -30,7 +30,7 @@ static const EnemyStats STATS[] = {
 void entities_init() {
     for (int i = 0; i < MAX_ENTITIES; i++) g_entities[i] = {};
     g_entity_count = 0;
-    g_player_idx   = 0;
+    g_player_idx   = -1;  // Initialize to invalid value to detect missing player
 }
 
 void entities_load_from_level() {
@@ -43,6 +43,15 @@ void entities_load_from_level() {
         e->yaw = (float)sp.facing_deg;
         if(type == ENT_PLAYER) g_player_idx = (int)(e - g_entities);
     }
+    
+    // Validate that player was spawned
+    if(g_player_idx < 0 || g_player_idx >= g_entity_count) {
+        fprintf(stderr, "[VOID] WARNING: Player entity not spawned! g_player_idx=%d, entity_count=%d\n", 
+                g_player_idx, g_entity_count);
+    } else {
+        fprintf(stderr, "[VOID] Player spawned at index=%d, total entities=%d\n", g_player_idx, g_entity_count);
+    }
+    
     nav_grid_build();
 }
 
@@ -180,6 +189,12 @@ bool nav_find_path(Vec3 from, Vec3 to, Vec3* out_wp, int max_wp, int* out_count)
 
 // ── Player update ─────────────────────────────────────────────────────────────
 void player_update(float dt) {
+    // Validate player entity exists
+    if(g_player_idx < 0 || g_player_idx >= g_entity_count) {
+        fprintf(stderr, "[VOID] ERROR: player_update called with invalid g_player_idx=%d\n", g_player_idx);
+        return;
+    }
+    
     Entity& p = g_entities[g_player_idx];
     if(!p.active || p.state==STATE_DEAD) return;
 

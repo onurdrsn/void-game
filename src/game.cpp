@@ -40,29 +40,29 @@ void game_init() {
 // LEVEL LOAD
 // ─────────────────────────────────────────────────────────────────────────────
 void game_load_level(int index) {
-    fprintf(stderr, "[VOID] game_load_level: start index=%d\n", index);
+    fprintf(stderr, "[VOID] game_load_level(%d) starting\n", index);
+    if(s_level_mesh.vao) {
+        fprintf(stderr, "[VOID] Destroying old mesh vao=%u\n", s_level_mesh.vao);
+        mesh_destroy(s_level_mesh);
+    }
     
-    fprintf(stderr, "[VOID] game_load_level: destroy old mesh\n");
-    if(s_level_mesh.vao) mesh_destroy(s_level_mesh);
-    
-    fprintf(stderr, "[VOID] game_load_level: level_load(%d)\n", index);
+    fprintf(stderr, "[VOID] Calling level_load(%d)\n", index);
     level_load(index);
-    
-    fprintf(stderr, "[VOID] game_load_level: level_build_mesh()\n");
+    fprintf(stderr, "[VOID] level_load done, calling level_build_mesh()\n");
     s_level_mesh = level_build_mesh();
+    fprintf(stderr, "[VOID] level_build_mesh done: vao=%u, vcount=%d\n", 
+            s_level_mesh.vao, s_level_mesh.vertex_count);
     
-    fprintf(stderr, "[VOID] game_load_level: entities_load_from_level()\n");
+    fprintf(stderr, "[VOID] Calling entities_load_from_level()\n");
     entities_load_from_level();
-    
-    fprintf(stderr, "[VOID] game_load_level: platform_capture_mouse(true)\n");
+    fprintf(stderr, "[VOID] entities_load_from_level done\n");
     platform_capture_mouse(true);
     
-    fprintf(stderr, "[VOID] game_load_level: finishing\n");
     g_game.current_level = index;
     g_game.boss_dead = false;
     g_game.time_elapsed = 0;
     audio_set_ambient(true);
-    fprintf(stderr, "[VOID] game_load_level: complete!\n");
+    fprintf(stderr, "[VOID] game_load_level(%d) complete\n", index);
 }
 
 void game_player_died() {
@@ -85,9 +85,11 @@ void game_update(float dt) {
 
     case GAME_MENU:
         g_game.menu_cursor += dt;
-        if(key_just_pressed(KEY_ENTER) || key_just_pressed(KEY_SPACE)){
+        if (key_just_pressed(KEY_ENTER) || key_just_pressed(KEY_SPACE)) {
+            fprintf(stderr, "[VOID] MENU: ENTER pressed, loading level 0...\n");
             game_load_level(0);
             g_game.state = GAME_PLAYING;
+            fprintf(stderr, "[VOID] MENU: State changed to PLAYING\n");
         }
         break;
 
@@ -98,7 +100,7 @@ void game_update(float dt) {
         level_update(dt);
 
         // Trigger check
-        {
+        if(g_player_idx >= 0 && g_player_idx < g_entity_count) {
             Entity& pl = g_entities[g_player_idx];
             int action=0, param=-1;
             level_check_triggers(pl.position, &action, &param);
@@ -121,7 +123,7 @@ void game_update(float dt) {
         }
 
         // Player death
-        {
+        if(g_player_idx >= 0 && g_player_idx < g_entity_count) {
             Entity& pl = g_entities[g_player_idx];
             if(pl.health <= 0.f) game_player_died();
         }
@@ -306,6 +308,24 @@ static void draw_crosshair(float cx,float cy){
 
 static void draw_hud(const RenderState& rs){
     float W=(float)rs.screen_w, H=(float)rs.screen_h;
+    
+    // Menu mode - show instructions
+    if(g_game.state == GAME_MENU) {
+        // Semi-transparent background
+        renderer_draw_rect(0, 0, W, H, 0, 0, 0, 0.3f);
+        
+        // Menu text (simple placeholder - just draw rects as visual feedback for now)
+        renderer_draw_rect(W*0.5f-200, H*0.5f-50, 400, 100, 0.2f, 0.2f, 0.3f, 0.9f);
+        
+        return;
+    }
+    
+    // Validate player entity
+    if(g_player_idx < 0 || g_player_idx >= g_entity_count) {
+        fprintf(stderr, "[VOID] ERROR: Invalid g_player_idx in draw_hud\n");
+        return;
+    }
+    
     Entity& pl = g_entities[g_player_idx];
 
     draw_crosshair(W*.5f,H*.5f);
@@ -405,6 +425,25 @@ void game_render() {
     if(frame_count++ % 60 == 0)
         fprintf(stderr, "[VOID] Render frame: state=%d\n", g_game.state);
 
+    // Handle non-gameplay states first (menu, etc.)
+    if(g_game.state==GAME_MENU || g_game.state==GAME_WIN) {
+        renderer_begin_frame_ui();
+        renderer_begin_hud();
+        if(g_game.state==GAME_MENU) {
+            draw_menu();
+        } else if(g_game.state==GAME_WIN) {
+            draw_win_screen();
+        }
+        renderer_end_frame();
+        return;
+    }
+
+    // For gameplay states, validate player entity exists
+    if(g_player_idx < 0 || g_player_idx >= g_entity_count) {
+        fprintf(stderr, "[VOID] ERROR: Invalid g_player_idx=%d, entity_count=%d\n", g_player_idx, g_entity_count);
+        return;
+    }
+
     Entity& pl = g_entities[g_player_idx];
     float yr=pl.yaw*DEG2RAD, pr=pl.pitch*DEG2RAD;
     Vec3 eye = pl.position + Vec3(0,1.65f,0);
@@ -430,32 +469,90 @@ void game_render() {
 
     if(g_game.state==GAME_PLAYING || g_game.state==GAME_PAUSED ||
        g_game.state==GAME_LEVEL_TRANSITION || g_game.state==GAME_DEAD) {
-
+        fprintf(stderr, "[VOID] GAMEPLAY state, calling renderer_begin_frame\n");
+        fflush(stderr);
         renderer_begin_frame(rs);
+        fprintf(stderr, "[VOID] renderer_begin_frame OK\n");
+        fflush(stderr);
 
         // Draw level
-        renderer_draw_world(s_level_mesh, g_textures[TEX_CONCRETE],
-                            Mat4::identity(), rs);
+        fprintf(stderr, "[VOID] Drawing world mesh: vao=%u, vcount=%d\n", 
+                s_level_mesh.vao, s_level_mesh.vertex_count);
+        fflush(stderr);
+        if(s_level_mesh.vao == 0 || s_level_mesh.vertex_count == 0) {
+            fprintf(stderr, "[VOID] ERROR: Invalid mesh VAO or vertex count! Skipping render\n");
+            fflush(stderr);
+        } else if(TEX_CONCRETE >= TEX_COUNT) {
+            fprintf(stderr, "[VOID] ERROR: Invalid texture ID %d for TEX_CONCRETE! Skipping render\n", TEX_CONCRETE);
+            fflush(stderr);
+        } else {
+            fprintf(stderr, "[VOID] Calling renderer_draw_world with tex=%d...\n", TEX_CONCRETE);
+            fflush(stderr);
+            // Disable for now to see if that's the crash point
+            // renderer_draw_world(s_level_mesh, g_textures[TEX_CONCRETE],
+            //                     Mat4::identity(), rs);
+            fprintf(stderr, "[VOID] World mesh rendering disabled (checking for crash)\n");
+            fflush(stderr);
+        }
 
         // Draw entities
+        fprintf(stderr, "[VOID] Drawing %d entities\n", g_entity_count);
+        fflush(stderr);
         for(int i=0;i<g_entity_count;i++){
             const Entity& e=g_entities[i];
+            fprintf(stderr, "[VOID] Entity %d: active=%d, state=%d, type=%d\n", 
+                    i, e.active, e.state, e.type);
+            fflush(stderr);
             if(!e.active || e.state==STATE_DEAD) continue;
+            
             if(i==g_player_idx){
+                fprintf(stderr, "[VOID] Drawing player (index %d)\n", i);
+                fflush(stderr);
                 // Draw weapon viewmodel
                 float bob_x = sinf(pl.bob_phase)*0.03f;
                 float bob_y = fabsf(cosf(pl.bob_phase*0.5f))*0.02f;
                 Vec3 right2 = fwd.cross(Vec3(0,1,0)).normalized();
                 Vec3 wp = eye + fwd*0.25f + right2*(0.1f+bob_x) + Vec3(0,-0.12f+bob_y,0);
                 Mat4 wm = Mat4::translate(wp) * Mat4::rotateY(pl.yaw*DEG2RAD);
-                renderer_draw_entity(s_entity_meshes[ENT_PLAYER],
-                                     g_textures[TEX_WEAPON], wm, rs);
+                fprintf(stderr, "[VOID] Player mesh: vao=%u, vertex_count=%d\n",
+                        s_entity_meshes[ENT_PLAYER].vao, s_entity_meshes[ENT_PLAYER].vertex_count);
+                fprintf(stderr, "[VOID] Weapon tex=%u, TEX_WEAPON=%d, g_textures addr=%p\n", 
+                        g_textures[TEX_WEAPON], TEX_WEAPON, (void*)g_textures);
+                fprintf(stderr, "[VOID] About to draw player mesh...\n");
+                fflush(stderr);
+                if(s_entity_meshes[ENT_PLAYER].vao == 0) {
+                    fprintf(stderr, "[VOID] ERROR: Player mesh VAO is invalid!\n");
+                    fflush(stderr);
+                } else if(TEX_WEAPON < 0 || TEX_WEAPON >= TEX_COUNT) {
+                    fprintf(stderr, "[VOID] ERROR: Weapon texture index %d out of bounds [0-%d]!\n", TEX_WEAPON, TEX_COUNT-1);
+                    fflush(stderr);
+                } else {
+                    fprintf(stderr, "[VOID] Calling renderer_draw_entity with mesh vao=%u, tex=%u...\n",
+                            s_entity_meshes[ENT_PLAYER].vao, g_textures[TEX_WEAPON]);
+                    fflush(stderr);
+                    renderer_draw_entity(s_entity_meshes[ENT_PLAYER],
+                                         g_textures[TEX_WEAPON], wm, rs);
+                    fprintf(stderr, "[VOID] Player mesh drawn OK\n");
+                    fflush(stderr);
+                }
+                fprintf(stderr, "[VOID] Player mesh drawn OK\n");
+                fflush(stderr);
                 continue;
             }
+            
             if(e.type==ENT_WRAITH && e.state==STATE_INVISIBLE) continue;
+
+            // Bounds check entity type
+            if(e.type < 0 || e.type >= 5) {
+                fprintf(stderr, "[VOID] ERROR: Invalid entity type %d\n", e.type);
+                fflush(stderr);
+                continue;
+            }
 
             TextureID tex = TEX_ENEMY_SKIN;
             Mat4 model = Mat4::translate(e.position)*Mat4::rotateY(e.yaw*DEG2RAD);
+            fprintf(stderr, "[VOID] Drawing entity type %d\n", e.type);
+            fflush(stderr);
             renderer_draw_entity(s_entity_meshes[e.type], g_textures[tex], model, rs);
         }
 
@@ -467,17 +564,6 @@ void game_render() {
         } else {
             draw_hud(rs);
         }
-        renderer_end_frame();
-    } else if(g_game.state==GAME_MENU){
-        renderer_begin_frame_ui();
-        renderer_begin_hud();
-        draw_menu();
-        renderer_end_frame();
-
-    } else if(g_game.state==GAME_WIN){
-        renderer_begin_frame_ui();
-        renderer_begin_hud();
-        draw_win_screen();
         renderer_end_frame();
     }
 }

@@ -246,6 +246,9 @@ static unsigned int link_program(const char* vsrc, const char* fsrc) {
 
 // ── FBO creation ─────────────────────────────────────────────────────────────
 static void create_fbo(int w, int h) {
+    // CRITICAL: Clear any accumulated GL errors before FBO operations
+    while(glGetError() != GL_NO_ERROR);
+    
     fprintf(stderr, "[VOID] Creating FBO: %dx%d\n", w, h);
     s_fbo_w = w; s_fbo_h = h;
 
@@ -281,11 +284,21 @@ static void create_fbo(int w, int h) {
         platform_fatal("Framebuffer not complete");
 
     glBindFramebuffer(0x8D40, 0);
+    
+    // Check and clear any errors from FBO operations
+    GLenum fbo_err = glGetError();
+    if(fbo_err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] WARNING: GL error during FBO creation: %x\n", fbo_err);
+    }
+    
     fprintf(stderr, "[VOID] FBO created successfully\n");
 }
 
 // ── Fullscreen quad ───────────────────────────────────────────────────────────
 static void create_fullscreen_quad() {
+    // CRITICAL: Clear any accumulated GL errors before VAO creation
+    while(glGetError() != GL_NO_ERROR);
+    
     static const float quad[] = {
         -1.f,-1.f, 0.f,0.f,
          1.f,-1.f, 1.f,0.f,
@@ -303,10 +316,17 @@ static void create_fullscreen_quad() {
     glGenVertexArrays(1, &s_quad_vao);
     if(!s_quad_vao) { fprintf(stderr,"[VOID] Failed to generate VAO for quad\n"); return; }
     glBindVertexArray(s_quad_vao);
+    GLenum err = glGetError();
+    if(err != GL_NO_ERROR) { 
+        fprintf(stderr,"[VOID] Failed to bind VAO for quad: %x\n", err); 
+        glDeleteVertexArrays(1, &s_quad_vao);
+        s_quad_vao = 0;
+        return; 
+    }
     glGenBuffers(1, &s_quad_vbo);
     if(!s_quad_vbo) { fprintf(stderr,"[VOID] Failed to generate VBO for quad\n"); return; }
-    glBindBuffer(0x8892, s_quad_vbo);
-    glBufferData(0x8892, sizeof(quad), quad, 0x88B8);
+    glBindBuffer(GL_ARRAY_BUFFER, s_quad_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, (void*)0);
     glEnableVertexAttribArray(1);
@@ -316,11 +336,43 @@ static void create_fullscreen_quad() {
 
 // ── HUD VAO ───────────────────────────────────────────────────────────────────
 static void create_hud_vao() {
+    // CRITICAL: Clear any accumulated GL errors before HUD VAO creation
+    while(glGetError() != GL_NO_ERROR);
+    
     glGenVertexArrays(1, &s_hud_vao);
+    if(!s_hud_vao) {
+        fprintf(stderr, "[VOID] Failed to generate HUD VAO\n");
+        return;
+    }
+    
     glBindVertexArray(s_hud_vao);
+    GLenum err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] Failed to bind HUD VAO: %x\n", err);
+        glDeleteVertexArrays(1, &s_hud_vao);
+        s_hud_vao = 0;
+        return;
+    }
+    
     glGenBuffers(1, &s_hud_vbo);
-    glBindBuffer(0x8892, s_hud_vbo);
-    glBufferData(0x8892, sizeof(s_hud_buf), nullptr, 0x88E8 /* GL_STREAM_DRAW */);
+    if(!s_hud_vbo) {
+        fprintf(stderr, "[VOID] Failed to generate HUD VBO\n");
+        glDeleteVertexArrays(1, &s_hud_vao);
+        s_hud_vao = 0;
+        return;
+    }
+    
+    glBindBuffer(GL_ARRAY_BUFFER, s_hud_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(s_hud_buf), nullptr, GL_STREAM_DRAW);
+    err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] Failed to setup HUD buffers: %x\n", err);
+        glDeleteBuffers(1, &s_hud_vbo);
+        glDeleteVertexArrays(1, &s_hud_vao);
+        s_hud_vao = s_hud_vbo = 0;
+        return;
+    }
+    
     // layout: a_pos(2) a_uv(2) a_color(4) — stride = 8 floats
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, 0, 32, (void*)0);
@@ -442,15 +494,23 @@ unsigned int texture_create(int w, int h, const unsigned char* rgba) {
     glGenTextures(1, &id);
     glBindTexture(GL_TEXTURE_2D, id);
     glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,rgba);
+    glFlush();  // Force GPU to process texture upload
     glGenerateMipmap(GL_TEXTURE_2D);
+    glFlush();  // Force GPU to complete mipmap generation
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,0x2703); // GL_LINEAR_MIPMAP_LINEAR
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+    // Critical: unbind texture immediately after creation
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glFlush();
     return id;
 }
 
 unsigned int texture_generate(TextureID id) {
+    // Clear any pending errors
+    while(glGetError() != GL_NO_ERROR);
+    
     static unsigned char px[64*64*4];
     switch(id){
         case TEX_CONCRETE:   gen_concrete(px);   break;
@@ -463,6 +523,16 @@ unsigned int texture_generate(TextureID id) {
         default: break;
     }
     g_textures[id] = texture_create(64,64,px);
+    
+    // CRITICAL: Full state reset after EACH texture to prevent corruption
+    glBindFramebuffer(0x8D40, 0);
+    glBindVertexArray(0);
+    glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    for(int i=0; i<3; i++) while(glGetError() != GL_NO_ERROR);
+    
     return g_textures[id];
 }
 
@@ -477,33 +547,132 @@ Mesh mesh_create(const float* verts, int vcount, int fpv,
     Mesh m={};
     m.vertex_count=vcount; m.index_count=icount;
     m.indexed=(icount>0);
+    
+    // CRITICAL: Validate input data
+    if(!verts || vcount <= 0 || fpv <= 0) {
+        fprintf(stderr, "[VOID] ERROR: mesh_create invalid params: verts=%p vcount=%d fpv=%d\n", verts, vcount, fpv);
+        return m;
+    }
 
-    glGenVertexArrays(1,&m.vao);
+    // CRITICAL: Clear any accumulated GL errors before mesh creation
+    // NOTE: On some drivers (AMD/NVIDIA), old error state can corrupt glBufferData
+    for(int i=0; i<10; i++) while(glGetError() != GL_NO_ERROR);
+
+    // Generate and bind VAO
+    glGenVertexArrays(1, &m.vao);
+    if(!m.vao) {
+        fprintf(stderr, "[VOID] ERROR: glGenVertexArrays returned 0\n");
+        return m;
+    }
+    
+    fprintf(stderr, "[VOID] mesh_create: glGenVertexArrays returned VAO=%u\n", m.vao);
+    fflush(stderr);
+    
     glBindVertexArray(m.vao);
+    GLenum err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] ERROR: glBindVertexArray failed: %x\n", err);
+        glDeleteVertexArrays(1, &m.vao);
+        m.vao = 0;
+        return m;
+    }
+    
+    fprintf(stderr, "[VOID] mesh_create: VAO=%u bound successfully\n", m.vao);
+    fflush(stderr);
 
-    glGenBuffers(1,&m.vbo);
-    glBindBuffer(0x8892,m.vbo);
-    glBufferData(0x8892,(long)(vcount*fpv*sizeof(float)),verts,0x88B8);
+    // Generate and bind VBO
+    glGenBuffers(1, &m.vbo);
+    if(!m.vbo) {
+        fprintf(stderr, "[VOID] ERROR: glGenBuffers VBO returned 0\n");
+        glDeleteVertexArrays(1, &m.vao);
+        m.vao = 0;
+        return m;
+    }
+    
+    glBindBuffer(0x8892, m.vbo);  // GL_ARRAY_BUFFER
+    err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] ERROR: glBindBuffer VBO failed: %x\n", err);
+        glDeleteBuffers(1, &m.vbo);
+        glDeleteVertexArrays(1, &m.vao);
+        m.vao = m.vbo = 0;
+        return m;
+    }
+    
+    // VERIFY VBO is actually bound
+    GLint vbo_bound;
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &vbo_bound);
+    if((GLuint)vbo_bound != m.vbo) {
+        fprintf(stderr, "[VOID] ERROR: VBO bind verification failed! Bound=%d Expected=%u\n", vbo_bound, m.vbo);
+        glDeleteBuffers(1, &m.vbo);
+        glDeleteVertexArrays(1, &m.vao);
+        m.vao = m.vbo = 0;
+        return m;
+    }
 
-    // Vertex layout: pos(3) + normal(3) + uv(2) = 8 floats
-    int stride=fpv*sizeof(float);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glFlush();
+    
+    // Final error clear before critical operation
+    while(glGetError() != GL_NO_ERROR);
+    
+    // Upload vertex data using GL_DYNAMIC_DRAW 
+    // Use explicit GL_ constant instead of hex for maximum compatibility
+    glBufferData(GL_ARRAY_BUFFER, (long)(vcount*fpv*sizeof(float)), verts, GL_DYNAMIC_DRAW);
+    glFlush();
+    err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] ERROR: glBufferData failed: %x (VAO=%u, VBO=%u, DataSize=%ld)\n", 
+                err, m.vao, m.vbo, (long)(vcount*fpv*sizeof(float)));
+        glDeleteBuffers(1, &m.vbo);
+        glDeleteVertexArrays(1, &m.vao);
+        m.vao = m.vbo = 0;
+        return m;
+    }
+    int stride = fpv * sizeof(float);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0,3,GL_FLOAT,0,stride,(void*)0);
-    if(fpv>=6){
+    glVertexAttribPointer(0, 3, GL_FLOAT, 0, stride, (void*)0);
+    
+    if(fpv >= 6) {
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1,3,GL_FLOAT,0,stride,(void*)12);
+        glVertexAttribPointer(1, 3, GL_FLOAT, 0, stride, (void*)12);
     }
-    if(fpv>=8){
+    
+    if(fpv >= 8) {
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2,2,GL_FLOAT,0,stride,(void*)24);
+        glVertexAttribPointer(2, 2, GL_FLOAT, 0, stride, (void*)24);
     }
 
-    if(icount>0){
-        glGenBuffers(1,&m.ebo);
-        glBindBuffer(0x8893,m.ebo); // GL_ELEMENT_ARRAY_BUFFER
-        glBufferData(0x8893,(long)(icount*sizeof(unsigned int)),idx,0x88B8);
+    // Handle indexed geometry if present
+    if(icount > 0) {
+        glGenBuffers(1, &m.ebo);
+        if(!m.ebo) {
+            fprintf(stderr, "[VOID] ERROR: glGenBuffers for EBO failed\n");
+            glDeleteBuffers(1, &m.vbo);
+            glDeleteVertexArrays(1, &m.vao);
+            m.vao = m.vbo = 0;
+            return m;
+        }
+        
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);  // GL_ELEMENT_ARRAY_BUFFER
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long)(icount*sizeof(unsigned int)), idx, GL_STATIC_DRAW);
+        
+        err = glGetError();
+        if(err != GL_NO_ERROR) {
+            fprintf(stderr, "[VOID] ERROR: EBO setup failed: %x\n", err);
+            glDeleteBuffers(1, &m.ebo);
+            glDeleteBuffers(1, &m.vbo);
+            glDeleteVertexArrays(1, &m.vao);
+            m.vao = m.vbo = m.ebo = 0;
+            return m;
+        }
     }
+
+    // Unbind for safety
     glBindVertexArray(0);
+    glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
+    
     return m;
 }
 
@@ -515,11 +684,22 @@ void mesh_destroy(Mesh& m) {
 }
 
 void mesh_draw(const Mesh& m) {
+    if(!m.vao || m.vertex_count <= 0) {
+        fprintf(stderr, "[VOID] mesh_draw: SKIP - Invalid mesh vao=%u vcount=%d\n", m.vao, m.vertex_count);
+        return;
+    }
+    
     glBindVertexArray(m.vao);
-    if(m.indexed)
-        glDrawElements(0x0004,m.index_count,GL_UNSIGNED_INT,(void*)0);
-    else
-        glDrawArrays(0x0004,0,m.vertex_count);
+    GLenum err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] mesh_draw: glBindVertexArray failed: %x\n", err);
+        return;
+    }
+    glDrawArrays(0x0004, 0, m.vertex_count);
+    err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] mesh_draw: glDrawArrays failed: %x vcount=%d\n", err, m.vertex_count);
+    }
     glBindVertexArray(0);
 }
 
@@ -527,6 +707,9 @@ void mesh_draw(const Mesh& m) {
 // RENDERER INIT / SHUTDOWN
 // ─────────────────────────────────────────────────────────────────────────────
 bool renderer_init(int w, int h) {
+    // CRITICAL: Clear any accumulated GL errors at init start
+    while(glGetError() != GL_NO_ERROR);
+    
     // Depth test, back-face culling
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
@@ -542,32 +725,99 @@ bool renderer_init(int w, int h) {
     s_prog_world = link_program(VERT_WORLD_SRC, FRAG_WORLD_SRC);
     s_prog_post  = link_program(VERT_POST_SRC,  FRAG_POST_SRC);
     s_prog_hud   = link_program(VERT_HUD_SRC,   FRAG_HUD_SRC);
-
-    // FBO + fullscreen quad + HUD vao
-    create_fbo(w, h);
-    create_fullscreen_quad();
-    create_hud_vao();
-
-    // Generate all procedural textures
-    for(int i=0;i<TEX_COUNT;i++) texture_generate((TextureID)i);
-
-    // CRITICAL: Ensure clean state before rendering
-    // Unbind everything to default state
+    
+    // CRITICAL: Shader compilation can mess up GL state - reset everything
     glBindFramebuffer(0x8D40, 0);
     glBindVertexArray(0);
     glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    for(int i=0; i<5; i++) while(glGetError() != GL_NO_ERROR);
+
+    // FBO + fullscreen quad + HUD vao
+    create_fbo(w, h);
+    
+    // Reset state after FBO creation
+    glBindFramebuffer(0x8D40, 0);
+    glBindVertexArray(0);
+    glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
+    for(int i=0; i<5; i++) while(glGetError() != GL_NO_ERROR);
+    
+    create_fullscreen_quad();
+    
+    // Reset state after quad creation
+    glBindFramebuffer(0x8D40, 0);
+    glBindVertexArray(0);
+    glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
+    glUseProgram(0);
+    for(int i=0; i<10; i++) while(glGetError() != GL_NO_ERROR);
+    
+    create_hud_vao();
+    
+    // Reset state after HUD vao creation - CRITICAL for texture generation
+    glBindFramebuffer(0x8D40, 0);
+    glBindVertexArray(0);
+    glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_RASTERIZER_DISCARD);
+    for(int i=0; i<10; i++) while(glGetError() != GL_NO_ERROR);
+    
+    // NOW generate textures - GL state is pristine
+    fprintf(stderr, "[VOID] About to generate procedural textures...\n");
+    fflush(stderr);
+    for(int i=0;i<TEX_COUNT;i++) {
+        fprintf(stderr, "[VOID] Generating texture %d\n", i);
+        fflush(stderr);
+        texture_generate((TextureID)i);
+    }
+    fprintf(stderr, "[VOID] Texture generation complete\n");
+    fflush(stderr);
+
+    // Reset state after textures
+    glBindFramebuffer(0x8D40, 0);
+    glBindVertexArray(0);
+    glBindBuffer(0x8892, 0);
+    glBindBuffer(0x8893, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    for(int i=0; i<10; i++) while(glGetError() != GL_NO_ERROR);
+    
+    // Final error check
+    GLenum init_err = glGetError();
+    if(init_err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] WARNING: GL error during renderer_init: %x\n", init_err);
+    }
 
     return true;
 }
 
 void renderer_shutdown() {
+    // Clear any pending GL errors before shutdown
+    while(glGetError() != GL_NO_ERROR);
+    
     if(s_prog_world) glDeleteProgram(s_prog_world);
     if(s_prog_post)  glDeleteProgram(s_prog_post);
     if(s_prog_hud)   glDeleteProgram(s_prog_hud);
+    if(s_quad_vao)   glDeleteVertexArrays(1, &s_quad_vao);
+    if(s_quad_vbo)   glDeleteBuffers(1, &s_quad_vbo);
+    if(s_hud_vao)    glDeleteVertexArrays(1, &s_hud_vao);
+    if(s_hud_vbo)    glDeleteBuffers(1, &s_hud_vbo);
     if(g_fbo)        glDeleteFramebuffers(1,&g_fbo);
     if(g_fbo_depth_rbo) glDeleteRenderbuffers(1,&g_fbo_depth_rbo);
+    if(g_fbo_color_tex) glDeleteTextures(1, &g_fbo_color_tex);
     for(int i=0;i<TEX_COUNT;i++) if(g_textures[i]) glDeleteTextures(1,&g_textures[i]);
+    
+    // Verify cleanup
+    GLenum cleanup_err = glGetError();
+    if(cleanup_err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] GL error during renderer_shutdown: %x\n", cleanup_err);
+    }
 }
 
 void renderer_resize(int w, int h) {
@@ -579,6 +829,9 @@ void renderer_resize(int w, int h) {
 // FRAME RENDERING
 // ─────────────────────────────────────────────────────────────────────────────
 void renderer_begin_frame(const RenderState& rs) {
+    // Clear any pending GL errors
+    while(glGetError());
+    
     // Render world into FBO
     glBindFramebuffer(0x8D40, g_fbo);
     glViewport(0,0,rs.screen_w,rs.screen_h);
@@ -588,7 +841,9 @@ void renderer_begin_frame(const RenderState& rs) {
 }
 
 static void set_world_uniforms(unsigned int prog, const RenderState& rs,
-                                const Mat4& model, unsigned int tex_id) {
+    const Mat4& model, unsigned int tex_id) {
+    
+    if (!prog) return;
     glUseProgram(prog);
 
     Mat4 mvp = rs.proj * rs.view * model;
@@ -636,6 +891,14 @@ void renderer_draw_world(const Mesh& m, unsigned int tex_id,
 
 void renderer_draw_entity(const Mesh& m, unsigned int tex_id,
                           const Mat4& model, const RenderState& rs) {
+    if(!s_prog_world) {
+        fprintf(stderr, "[VOID] ERROR: renderer_draw_entity called but s_prog_world is not initialized\n");
+        return;
+    }
+    if(!m.vao || m.vertex_count <= 0) {
+        fprintf(stderr, "[VOID] ERROR: renderer_draw_entity called with invalid mesh vao=%u vcount=%d\n", m.vao, m.vertex_count);
+        return;
+    }
     set_world_uniforms(s_prog_world, rs, model, tex_id);
     mesh_draw(m);
 }
@@ -664,7 +927,14 @@ void renderer_end_world(const RenderState& rs) {
         fprintf(stderr, "[VOID] ERROR: s_quad_vao is null\n");
         return;
     }
+    
     glBindVertexArray(s_quad_vao);
+    GLenum err = glGetError();
+    if(err != GL_NO_ERROR) {
+        fprintf(stderr, "[VOID] renderer_end_world: glBindVertexArray failed: %x\n", err);
+        return;
+    }
+    
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
 }
@@ -749,8 +1019,16 @@ void renderer_draw_rect_uv(float x, float y, float w, float h, unsigned int tex,
 void renderer_end_frame() {
     // Flush remaining HUD batch
     if(s_hud_verts > 0) {
+        // Safety checks for HUD VAO/VBO validity
+        if(!s_hud_vao || !s_hud_vbo || !s_prog_hud) {
+            fprintf(stderr, "[VOID] renderer_end_frame: SKIP - Invalid HUD state vao=%u vbo=%u prog=%u\n", 
+                    s_hud_vao, s_hud_vbo, s_prog_hud);
+            s_hud_verts = 0;
+            return;
+        }
+        
         // Clear any stale errors
-        while(glGetError() != GL_NO_ERROR) ;
+        while(glGetError() != GL_NO_ERROR);
         
         glUseProgram(s_prog_hud);
         float sw=(float)g_platform.width, sh=(float)g_platform.height;
@@ -760,6 +1038,14 @@ void renderer_end_frame() {
         glBindVertexArray(s_hud_vao);
         glBindBuffer(0x8892, s_hud_vbo);
         glBufferSubData(0x8892, 0, (long)(s_hud_verts*8*sizeof(float)), s_hud_buf);
+        GLenum err = glGetError();
+        if(err != GL_NO_ERROR) {
+            fprintf(stderr, "[VOID] renderer_end_frame: glBufferSubData failed: %x\n", err);
+            glBindVertexArray(0);
+            s_hud_verts = 0;
+            return;
+        }
+        
         glDrawArrays(GL_TRIANGLES, 0, s_hud_verts);
         
         glBindVertexArray(0);
