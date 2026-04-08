@@ -40,15 +40,29 @@ void game_init() {
 // LEVEL LOAD
 // ─────────────────────────────────────────────────────────────────────────────
 void game_load_level(int index) {
+    fprintf(stderr, "[VOID] game_load_level: start index=%d\n", index);
+    
+    fprintf(stderr, "[VOID] game_load_level: destroy old mesh\n");
     if(s_level_mesh.vao) mesh_destroy(s_level_mesh);
+    
+    fprintf(stderr, "[VOID] game_load_level: level_load(%d)\n", index);
     level_load(index);
+    
+    fprintf(stderr, "[VOID] game_load_level: level_build_mesh()\n");
     s_level_mesh = level_build_mesh();
+    
+    fprintf(stderr, "[VOID] game_load_level: entities_load_from_level()\n");
     entities_load_from_level();
+    
+    fprintf(stderr, "[VOID] game_load_level: platform_capture_mouse(true)\n");
     platform_capture_mouse(true);
+    
+    fprintf(stderr, "[VOID] game_load_level: finishing\n");
     g_game.current_level = index;
     g_game.boss_dead = false;
     g_game.time_elapsed = 0;
     audio_set_ambient(true);
+    fprintf(stderr, "[VOID] game_load_level: complete!\n");
 }
 
 void game_player_died() {
