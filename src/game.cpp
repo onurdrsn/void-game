@@ -249,7 +249,7 @@ static void draw_number(float x, float y, int n, float r, float g2, float b, flo
     draw_digit(x,y,n%10,r,g2,b,a);
 }
 
-// Big letter rendering (3x scale segments, letters: V O I D P A U S E D Y E)
+// Big letter rendering (3x scale segments, letters: V O I D P A U S E C Y R T N M W L K)
 static void draw_big_letter(float x,float y,char c,float r,float g2,float b,float a){
     float s=3.f; // scale
     switch(c){
@@ -291,12 +291,39 @@ static void draw_big_letter(float x,float y,char c,float r,float g2,float b,floa
     case 'U': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
               renderer_draw_rect(x+8*s,y,4*s,20*s,r,g2,b,a);
               renderer_draw_rect(x,y+16*s,12*s,4*s,r,g2,b,a); break;
+    case 'R': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x,y,12*s,4*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y,4*s,10*s,r,g2,b,a);
+              renderer_draw_rect(x,y+8*s,12*s,4*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y+8*s,4*s,12*s,r,g2,b,a); break;
+    case 'T': renderer_draw_rect(x,y,12*s,4*s,r,g2,b,a);
+              renderer_draw_rect(x+4*s,y,4*s,20*s,r,g2,b,a); break;
+    case 'N': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+4*s,y+8*s,4*s,4*s,r,g2,b,a); break;
+    case 'M': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+2*s,y+2*s,4*s,4*s,r,g2,b,a);
+              renderer_draw_rect(x+6*s,y+2*s,4*s,4*s,r,g2,b,a); break;
+    case 'W': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+2*s,y+16*s,4*s,4*s,r,g2,b,a);
+              renderer_draw_rect(x+6*s,y+16*s,4*s,4*s,r,g2,b,a); break;
+    case 'L': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x,y+16*s,12*s,4*s,r,g2,b,a); break;
+    case 'K': renderer_draw_rect(x,y,4*s,20*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y+2*s,4*s,8*s,r,g2,b,a);
+              renderer_draw_rect(x+8*s,y+10*s,4*s,10*s,r,g2,b,a); break;
     default: break;
     }
 }
 
 static void draw_big_string(float x,float y, const char* str, float r,float g2,float b,float a){
-    while(*str){ draw_big_letter(x,y,*str,r,g2,b,a); x+=48.f; str++; }
+    while(*str){ 
+        if(*str != ' ') draw_big_letter(x,y,*str,r,g2,b,a);
+        x+=36.f; 
+        str++; 
+    }
 }
 
 static void draw_crosshair(float cx,float cy){
@@ -338,16 +365,28 @@ static void draw_hud(const RenderState& rs){
     renderer_draw_rect(8,H-52, 6,18, 0.8f,0.1f,0.1f,1);
     renderer_draw_rect(3,H-47,16,8,  0.8f,0.1f,0.1f,1);
 
-    // Ammo
+    // Weapon indicator and ammo
     if(pl.weapon==WEAPON_PISTOL){
-        draw_number(W-100,H-50, pl.ammo_clip,   1,1,0.8f,1);
-        renderer_draw_rect(W-70,H-43, 4,3, 1,1,1,0.5f);
-        draw_number(W-60, H-50, pl.ammo_pistol, 0.6f,0.6f,0.6f,1);
+        // Ammo clip / reserve - sağ altta
+        draw_number(W-80,H-50, pl.ammo_clip,   1,1,0.8f,1);
+        renderer_draw_rect(W-50,H-45, 4,2, 1,1,1,0.5f);
+        draw_number(W-40, H-50, pl.ammo_pistol, 0.6f,0.6f,0.6f,1);
+        
+        // Reload indicator
+        if(pl.reloading){
+            float reload_progress = 1.f - (pl.reload_timer / 1.5f);
+            renderer_draw_rect(W-80, H-70, 60*reload_progress, 8, 1,0.5f,0.2f,0.8f);
+            renderer_draw_rect(W-80, H-70, 60, 8, 0.3f,0.3f,0.3f,0.3f);
+        }
     }
 
-    // Flashlight indicator
-    if(pl.flashlight_on)
-        renderer_draw_rect(W-30,H-30, 16,8, 1,0.95f,0.7f,0.6f);
+    // Flashlight indicator - sağ altta
+    if(pl.flashlight_on) {
+        renderer_draw_rect(W-90,H-30, 30,20, 1,0.95f,0.7f,0.9f);
+        renderer_draw_rect(W-88,H-28, 26,16, 1,0.8f,0.3f,1);
+    } else {
+        renderer_draw_rect(W-90,H-30, 30,20, 0.2f,0.2f,0.2f,0.5f);
+    }
 
     // Hurt flash
     if(pl.hurt_flash>0)
@@ -372,17 +411,12 @@ static void draw_menu(){
     // Title "VOID"
     float tx=W/2-96.f, ty=H/3;
     draw_big_string(tx,ty,"VOID", 0.8f,0.1f,0.1f,1);
-    // Blinking subtitle
+    
+    // Blinking "PRESS ENTER" text
     float blink = sinf(g_game.menu_cursor*3.f);
-    if(blink>0){
-        float sx=W/2-150.f, sy=H/2+20;
-        for(const char* t="PRESS ENTER TO BEGIN"; *t; t++,sx+=16)
-            renderer_draw_rect(sx,sy,12,2, 0.8f,0.8f,0.8f,0.9f);
-        // Simple text representation via small rects
-        // (full font not implemented — use segment draw)
-        renderer_draw_rect(W/2-80,H/2+20,160,18, 0.7f,0.7f,0.7f,0.1f);
-        draw_big_string(W/2-200,H/2+10,"ESCAPE", 0.5f,0.5f,0.5f,0.6f);
-    }
+    float alpha = math_maxf(0.3f, blink);
+    draw_big_string(W/2-220,H/2+50,"PRESS ENTER", 0.8f,0.8f,0.8f,alpha);
+    
     // Pulsing vignette effect
     float vp=0.5f+0.3f*sinf(g_game.menu_cursor*1.5f);
     renderer_draw_rect(0,0,80,H,   0,0,0,vp*0.5f);
@@ -462,7 +496,7 @@ void game_render() {
     rs.flash_pos=eye;
     rs.flash_dir=fwd;
     rs.flash_intensity=1.f;
-    rs.ambient=0.04f;
+    rs.ambient=0.15f;
     rs.proj=Mat4::perspective(75.f*DEG2RAD, aspect, 0.05f, 150.f);
     rs.view=Mat4::lookAt(eye, eye+fwd, Vec3(0,1,0));
     rs.light_count=0;
@@ -513,7 +547,7 @@ void game_render() {
                 float bob_y = fabsf(cosf(pl.bob_phase*0.5f))*0.02f;
                 Vec3 right2 = fwd.cross(Vec3(0,1,0)).normalized();
                 Vec3 wp = eye + fwd*0.25f + right2*(0.1f+bob_x) + Vec3(0,-0.12f+bob_y,0);
-                Mat4 wm = Mat4::translate(wp) * Mat4::rotateY(pl.yaw*DEG2RAD);
+                Mat4 wm = Mat4::translate(wp) * Mat4::rotateY(pl.yaw*DEG2RAD) * Mat4::rotateX(pl.pitch*DEG2RAD*0.3f);
                 fprintf(stderr, "[VOID] Player mesh: vao=%u, vertex_count=%d\n",
                         s_entity_meshes[ENT_PLAYER].vao, s_entity_meshes[ENT_PLAYER].vertex_count);
                 fprintf(stderr, "[VOID] Weapon tex=%u, TEX_WEAPON=%d, g_textures addr=%p\n", 

@@ -5,6 +5,7 @@
 #include "audio.h"
 #include "platform.h"
 #include "vmath.h"
+#include "game.h"
 #include <cstring>
 #include <cstdio>
 #include <cmath>
@@ -89,8 +90,26 @@ Entity* entity_spawn(EntityType type, Vec3 pos) {
 }
 
 void entity_kill(int idx) {
-    g_entities[idx].state  = STATE_DEAD;
-    g_entities[idx].state_timer = 3.f;
+    Entity& e = g_entities[idx];
+    e.state  = STATE_DEAD;
+    e.state_timer = 3.f;
+    
+    // Random drops when enemy dies
+    if(idx != g_player_idx && e.type != ENT_PLAYER && g_player_idx >= 0) {
+        int drop_roll = (int)(noise_hash(idx + g_game.time_elapsed) * 100.f) % 100;
+        Entity& player = g_entities[g_player_idx];
+        
+        // 40% chance for health
+        if(drop_roll < 40) {
+            player.health = math_mini(100.f, player.health + 25.f);
+            audio_play(SND_RELOAD, 0.5f, 1.2f);
+        }
+        // 30% chance for ammo
+        else if(drop_roll < 70 && player.ammo_pistol < 120) {
+            player.ammo_pistol = math_mini(120, player.ammo_pistol + 24);
+            audio_play(SND_RELOAD, 0.5f, 0.9f);
+        }
+    }
 }
 
 void entity_damage(int idx, float dmg, Vec3 /*hit_dir*/) {
@@ -198,8 +217,8 @@ void player_update(float dt) {
     Entity& p = g_entities[g_player_idx];
     if(!p.active || p.state==STATE_DEAD) return;
 
-    const float sensitivity = 0.12f;
-    p.yaw   += g_platform.mouse_dx * sensitivity;
+    const float sensitivity = 0.06f;
+    p.yaw   -= g_platform.mouse_dx * sensitivity;
     p.pitch -= g_platform.mouse_dy * sensitivity;
     p.pitch  = math_clamp(p.pitch, -89.f, 89.f);
 
@@ -210,7 +229,7 @@ void player_update(float dt) {
     Vec3 right = fwd_flat.cross(Vec3(0,1,0)).normalized();
     p.facing = forward;
 
-    float speed = key_down(KEY_SHIFT) ? 8.f : 5.f;
+    float speed = key_down(KEY_SHIFT) ? 12.f : 5.f;
     if(p.in_water) speed *= 0.4f;
 
     Vec3 wish(0,0,0);
@@ -228,7 +247,7 @@ void player_update(float dt) {
 
     // Jump / swim
     if(key_just_pressed(KEY_SPACE)){
-        if(p.on_ground) p.velocity.y = 6.f;
+        if(p.on_ground) p.velocity.y = 8.f;
         else if(p.in_water) p.velocity.y = 2.5f;
     }
 
@@ -304,6 +323,7 @@ void player_shoot() {
     if(p.ammo_clip<=0||p.reloading) return;
     p.ammo_clip--;
     audio_play(SND_GUNSHOT, 0.8f, 1.f);
+    fprintf(stderr, "[VOID] SHOOT: ammo_clip=%d, raycast starting\n", p.ammo_clip);
 
     // Raycast against entities
     Vec3 eye = p.position + Vec3(0,1.65f,0);
@@ -321,9 +341,15 @@ void player_shoot() {
         float t0,t1;
         if(ray.intersectsAABB(wb,t0,t1)&&t0>0&&t0<best){
             best=t0; hit_idx=i;
+            fprintf(stderr, "[VOID] RAYCAST HIT: entity %d at distance %.2f\n", i, t0);
         }
     }
-    if(hit_idx>=0) entity_damage(hit_idx, 25.f, dir);
+    if(hit_idx>=0) {
+        fprintf(stderr, "[VOID] DAMAGE: entity %d taking 25 damage\n", hit_idx);
+        entity_damage(hit_idx, 25.f, dir);
+    } else {
+        fprintf(stderr, "[VOID] RAYCAST MISS: no entities hit\n");
+    }
 }
 
 void player_reload() {
